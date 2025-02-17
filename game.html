@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Melee Battle Game</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+            background: #87CEEB;
+        }
+        .ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-family: Arial, sans-serif;
+            color: white;
+            font-size: 18px;
+        }
+        .game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            color: red;
+            font-family: Arial, sans-serif;
+            text-shadow: 2px 2px 5px black;
+        }
+        .button-container {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .button-container button {
+            margin: 10px;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .button-container button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+<div class="ui">
+    <p>Arrow Keys: Move</p>
+    <p>Space: Attack</p>
+    <p>Shift: Dash</p>
+    <p>Ctrl: Ultimate Ground Split (Jump Attack)</p>
+</div>
+<div id="gameOver" class="game-over" style="display: none;">You Lose</div>
+
+<div class="button-container">
+    <button id="attackButton">Attack</button>
+    <button id="dashButton">Dash</button>
+    <button id="jumpButton">Ultimate Ground Split</button>
+</div>
+
+<script>
+// Game setup
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Set canvas dimensions
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+// Game variables
+let hero, enemy;
+let heroHealth = 100, heroStamina = 100;
+let enemyHealth = 100, enemyStamina = 100;
+let heroKnockback = 0, enemyKnockback = 0;
+let heroJumping = false;
+let gameOver = false;
+let missiles = [];
+let lastAttackTime = 0;
+let lastDashTime = 0;
+let lastJumpTime = 0;
+
+// Hero class (Player character)
+class Hero {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.width = 50;
+        this.height = 50;
+        this.image = new Image();
+        this.image.src = 'hero.png'; // Hero image
+        this.speed = 5;
+        this.attackRange = 60;
+        this.attackCooldown = 0;
+        this.staminaRechargeRate = 1;
+        this.jumpingHeight = 0;
+    }
+
+    draw() {
+        // Draw Hero (Player) using the image
+        ctx.drawImage(this.image, this.x, this.y - this.jumpingHeight, this.width, this.height);
+
+        // Draw Stamina and Health Bar
+        this.drawHealthBar();
+        this.drawStaminaBar();
+    }
+
+    drawHealthBar() {
+        ctx.fillStyle = 'gray';
+        ctx.fillRect(10, 10, 200, 20);
+        ctx.fillStyle = 'red';
+        ctx.fillRect(10, 10, heroHealth * 2, 20);
+        ctx.fillStyle = 'black';
+        ctx.font = '16px Arial';
+        ctx.fillText(`HP: ${heroHealth}`, 10, 35);
+    }
+
+    drawStaminaBar() {
+        ctx.fillStyle = 'gray';
+        ctx.fillRect(10, 40, 200, 20);
+        ctx.fillStyle = 'green';
+        ctx.fillRect(10, 40, heroStamina * 2, 20);
+        ctx.fillStyle = 'black';
+        ctx.font = '16px Arial';
+        ctx.fillText(`ST: ${heroStamina}`, 10, 65);
+    }
+
+    move(direction) {
+        if (direction === 'left' && this.x > 0) this.x -= this.speed;
+        if (direction === 'right' && this.x + this.width < canvas.width) this.x += this.speed;
+        if (direction === 'up' && this.y > 200) this.y -= this.speed;
+        if (direction === 'down' && this.y + this.height < canvas.height) this.y += this.speed;
+    }
+
+    attack() {
+        const currentTime = Date.now();
+        if (currentTime - lastAttackTime < 500) return; // Cooldown for attack (500ms)
+        lastAttackTime = currentTime;
+
+        if (heroStamina < 10) return;
+
+        // Attack logic: If Hero's sword is within the range of enemy, damage enemy
+        if (this.x + this.width / 2 + this.attackRange > enemy.x && this.x + this.width / 2 < enemy.x + enemy.width &&
+            this.y < enemy.y + enemy.height && this.y + this.height > enemy.y) {
+            enemyHealth -= 10;
+            heroStamina -= 10;
+        }
+    }
+
+    dash() {
+        const currentTime = Date.now();
+        if (currentTime - lastDashTime < 500) return; // Dash cooldown (500ms)
+        lastDashTime = currentTime;
+
+        if (this.attackCooldown > 0 || heroStamina < 30) return;
+        // Dash ability
+        this.x += 100;
+        heroStamina -= 30; // Consume stamina for dash
+    }
+
+    ultimateGroundSplit() {
+        const currentTime = Date.now();
+        if (currentTime - lastJumpTime < 500) return; // Jump cooldown (500ms)
+        lastJumpTime = currentTime;
+
+        if (heroStamina < 50) return;
+        // Hero performs a jump and strike (Ultimate Ground Split)
+        heroJumping = true;
+        heroStamina -= 50;
+
+        setTimeout(() => {
+            heroJumping = false;
+            // Strike down
+            if (this.x + this.width / 2 + this.attackRange > enemy.x && this.x + this.width / 2 < enemy.x + enemy.width &&
+                this.y - this.jumpingHeight < enemy.y + enemy.height && this.y - this.jumpingHeight + 100 > enemy.y) {
+                enemyHealth -= 30; // Big damage on hit
+            }
+        }, 800); // Duration of jump
+    }
+
+    update() {
+        if (this.attackCooldown > 0) {
+            this.attackCooldown--;
+        }
+        // Regenerate stamina
+        if (heroStamina < 100) heroStamina += this.staminaRechargeRate;
+        // Handle jumping
+        if (heroJumping) {
+            if (this.jumpingHeight < 100) {
+                this.jumpingHeight += 10;  // Jump up
+            }
+        } else if (this.jumpingHeight > 0) {
+            this.jumpingHeight -= 10;  // Fall down
+        }
+    }
+}
+
+// Enemy class (with missile firing)
+class Enemy {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.width = 50;
+        this.height = 50;
+        this.image = new Image();
+        this.image.src = 'hasina.png';  // Enemy image
+        this.missileImage = new Image();
+        this.missileImage.src = 'missile.png'; // Missile image
+        this.attackCooldown = 0;
+        this.attackRange = 100;
+        this.staminaRechargeRate = 1;
+        this.missileCooldown = 0;
+    }
+
+    draw() {
+        // Draw Enemy
+        ctx.drawImage(this.image, this.x, this.y, this.width, this.height);
+
+        // Draw Missiles
+        missiles.forEach(missile => missile.draw());
+
+        // Draw Health and Stamina Bar for enemy
+        this.drawHealthBar();
+        this.drawStaminaBar();
+    }
+
+    drawHealthBar() {
+        ctx.fillStyle = 'gray';
+        ctx.fillRect(canvas.width - 210, 10, 200, 20);
+        ctx.fillStyle = 'red';
+        ctx.fillRect(canvas.width - 210, 10, enemyHealth * 2, 20);
+        ctx.fillStyle = 'black';
+        ctx.font = '16px Arial';
+        ctx.fillText(`HP: ${enemyHealth}`, canvas.width - 210, 35);
+    }
+
+    drawStaminaBar() {
+        ctx.fillStyle = 'gray';
+        ctx.fillRect(canvas.width - 210, 40, 200, 20);
+        ctx.fillStyle = 'green';
+        ctx.fillRect(canvas.width - 210, 40, enemyStamina * 2, 20);
+        ctx.fillStyle = 'black';
+        ctx.font = '16px Arial';
+        ctx.fillText(`ST: ${enemyStamina}`, canvas.width - 210, 65);
+    }
+
+    attack() {
+        if (this.missileCooldown > 0) return;
+
+        // Create a missile aimed at the player's position
+        let missile = new Missile(this.x + this.width / 2, this.y + this.height / 2, hero.x, hero.y);
+        missiles.push(missile);
+        this.missileCooldown = 180; // Cooldown time for missile attack (3 seconds)
+
+        setTimeout(() => {
+            missiles.shift(); // Remove the missile once it's fired
+        }, 2000); // Missiles live for 2 seconds before being removed
+    }
+
+    update() {
+        if (this.missileCooldown > 0) {
+            this.missileCooldown--;
+        }
+
+        // Fire missiles every 3 seconds (delay set to 3 seconds)
+        if (this.missileCooldown === 0 && !gameOver) {
+            this.attack();
+        }
+    }
+}
+
+// Missile class
+class Missile {
+    constructor(x, y, targetX, targetY) {
+        this.x = x;
+        this.y = y;
+        this.width = 20;
+        this.height = 10;
+        this.speed = 5;
+        this.targetX = targetX;
+        this.targetY = targetY;
+
+        // Calculate direction vector from enemy to hero
+        this.dx = this.targetX - this.x;
+        this.dy = this.targetY - this.y;
+        this.angle = Math.atan2(this.dy, this.dx);
+    }
+
+    draw() {
+        ctx.drawImage(enemy.missileImage, this.x, this.y, this.width, this.height);
+        this.update();
+    }
+
+    update() {
+        // Move missile towards the player's position
+        this.x += Math.cos(this.angle) * this.speed;
+        this.y += Math.sin(this.angle) * this.speed;
+
+        // Check collision with hero
+        if (this.x + this.width > hero.x && this.x < hero.x + hero.width &&
+            this.y > hero.y && this.y < hero.y + hero.height) {
+            heroHealth -= 20; // Missiles deal damage to hero
+            missiles = missiles.filter(m => m !== this); // Remove missile after collision
+        }
+    }
+}
+
+// Initialize the player (Hero) and enemy
+hero = new Hero(canvas.width / 2 - 100, canvas.height / 2 + 50);
+enemy = new Enemy(canvas.width / 2 + 100, canvas.height / 2 + 50);
+
+// Event listener for player movement and attacks
+document.addEventListener('keydown', (e) => {
+    if (gameOver) return; // Disable keys if game over
+    if (e.key === 'ArrowLeft') hero.move('left');
+    if (e.key === 'ArrowRight') hero.move('right');
+    if (e.key === 'ArrowUp') hero.move('up');
+    if (e.key === 'ArrowDown') hero.move('down');
+    if (e.key === ' ') hero.attack();  // Spacebar for attack
+    if (e.key === 'Shift') hero.dash();  // Shift for dash ability
+    if (e.key === 'Control') hero.ultimateGroundSplit();  // Ctrl for Ultimate Ground Split
+});
+
+// Skill buttons
+document.getElementById('attackButton').addEventListener('click', () => hero.attack());
+document.getElementById('dashButton').addEventListener('click', () => hero.dash());
+document.getElementById('jumpButton').addEventListener('click', () => hero.ultimateGroundSplit());
+
+// Game loop
+function gameLoop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear the screen
+
+    // Check for game over
+    if (heroHealth <= 0 && !gameOver) {
+        gameOver = true;
+        document.getElementById('gameOver').style.display = 'block';
+        return; // Stop the game loop if game is over
+    }
+
+    // Draw background image
+    const background = new Image();
+    background.src = 'hasina gu a.jpg'; // Background image of the game
+    ctx.drawImage(background, 0, 0, canvas.width, canvas.height); // Draw background
+
+    // Draw and update hero
+    hero.update();
+    hero.draw();
+
+    // Draw and update enemy
+    enemy.update();
+    enemy.draw();
+
+    requestAnimationFrame(gameLoop);  // Keep looping
+}
+
+// Start the game loop
+gameLoop();
+
+</script>
+</body>
+</html>
